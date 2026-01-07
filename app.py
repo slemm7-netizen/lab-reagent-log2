@@ -5,23 +5,25 @@ import gspread
 from oauth2client.service_account import ServiceAccountCredentials
 
 # --- 구글 시트 연동 설정 ---
-# 구글 시트 파일 이름 (아까 만드신 스프레드시트 이름과 똑같아야 합니다!)
 SHEET_NAME = 'culture_media_log'
-# 인증 키 파일 이름
-KEY_FILE = 'secrets.json'
 
 def connect_google_sheet():
-    # 인증 범위 설정
+    # 인증 범위
     scope = ['https://spreadsheets.google.com/feeds', 'https://www.googleapis.com/auth/drive']
     
-    # 키 파일이 있는지 확인
     try:
-        creds = ServiceAccountCredentials.from_json_keyfile_name(KEY_FILE, scope)
+        # [변경점] 파일 대신 Streamlit Secrets에서 정보를 가져옵니다.
+        # secrets.toml에 적은 [gcp_service_account] 섹션을 읽어옵니다.
+        creds_dict = dict(st.secrets["gcp_service_account"])
+        
+        # 딕셔너리 정보를 이용해 인증
+        creds = ServiceAccountCredentials.from_json_keyfile_dict(creds_dict, scope)
         client = gspread.authorize(creds)
         spreadsheet = client.open(SHEET_NAME)
         return spreadsheet.sheet1
-    except FileNotFoundError:
-        st.error(f"🚨 '{KEY_FILE}' 파일을 찾을 수 없습니다! 폴더에 키 파일을 넣어주세요.")
+        
+    except KeyError:
+        st.error("🚨 Secrets 설정이 안 되어 있습니다. Streamlit Cloud Settings -> Secrets에 [gcp_service_account] 정보를 넣어주세요.")
         st.stop()
     except Exception as e:
         st.error(f"🚨 구글 시트 연결 실패: {e}")
@@ -31,7 +33,6 @@ def connect_google_sheet():
 def load_data(worksheet):
     data = worksheet.get_all_records()
     if not data:
-        # 데이터가 없으면 빈 껍데기만 만듦
         return pd.DataFrame(columns=[
             '조제 번호', '조제 일자', '작업자', 
             'Basal Media_Lot', 'FBS_Lot', 'Antibiotics_Lot', 
@@ -39,19 +40,14 @@ def load_data(worksheet):
         ])
     return pd.DataFrame(data)
 
-# 데이터 저장하기 (새로운 행 추가)
+# 데이터 저장하기
 def add_data(worksheet, new_row_list):
-    # 리스트 형태로 맨 아래에 추가
     worksheet.append_row(new_row_list)
 
-# 데이터 전체 업데이트 (수정 시 사용)
+# 데이터 수정하기
 def update_all_data(worksheet, df):
-    # 기존 내용 싹 지우고
     worksheet.clear()
-    # 헤더(제목) 다시 쓰기
     worksheet.append_row(df.columns.tolist())
-    # 데이터 쓰기
-    # (주의: 데이터가 많으면 느려질 수 있습니다)
     worksheet.update('A2', df.values.tolist())
 
 # 조제 번호 자동 생성
@@ -62,8 +58,6 @@ def generate_batch_id(df):
     if df.empty:
         return f"{prefix}01"
     
-    # 데이터프레임의 조제 번호를 문자열로 변환하여 확인
-    # 구글 시트에서 숫자로 인식될 경우를 대비해 astype(str) 필수
     today_batches = df[df['조제 번호'].astype(str).str.startswith(prefix)]
     
     if today_batches.empty:
@@ -74,14 +68,13 @@ def generate_batch_id(df):
         return f"{prefix}{next_num:02d}"
 
 def main():
-    st.set_page_config(page_title="배양배지 조제 관리(구글시트)", layout="wide")
-    st.title("🧫 배양배지 조제 관리 (Google Sheets 연동)")
+    st.set_page_config(page_title="배양배지 조제 관리", layout="wide")
+    st.title("🧫 배양배지 조제 관리 시스템")
 
     # 1. 구글 시트 연결
     sheet = connect_google_sheet()
     
     # 2. 데이터 불러오기
-    # (API 호출을 줄이기 위해 캐싱을 쓰면 좋지만, 실시간성을 위해 직접 호출)
     df = load_data(sheet)
 
     # 탭 구성
@@ -110,7 +103,6 @@ def main():
                 if not operator:
                     st.error("작업자를 입력하세요.")
                 else:
-                    # 구글 시트에 넣을 순서대로 리스트 생성
                     new_row = [
                         auto_batch_id,
                         date.strftime("%Y-%m-%d"),
@@ -120,28 +112,23 @@ def main():
                         lot_anti,
                         notes
                     ]
-                    
-                    with st.spinner("구글 시트에 저장 중..."):
+                    with st.spinner("저장 중..."):
                         add_data(sheet, new_row)
-                    
                     st.success("저장 완료!")
                     st.rerun()
 
     # --- Sheet 2: 수정 ---
     with tab2:
         st.subheader("기록 확인 및 수정")
-        
         if not df.empty:
-            # 구글 시트에서 가져온 데이터프레임을 에디터로 표시
             edited_df = st.data_editor(
                 df,
                 use_container_width=True,
                 num_rows="dynamic",
                 key="editor"
             )
-            
-            if st.button("💾 구글 시트에 수정사항 반영하기", type="primary"):
-                with st.spinner("구글 시트 덮어쓰는 중... (잠시만 기다리세요)"):
+            if st.button("💾 수정사항 반영하기", type="primary"):
+                with st.spinner("업데이트 중..."):
                     update_all_data(sheet, edited_df)
                 st.success("수정 완료!")
                 st.rerun()

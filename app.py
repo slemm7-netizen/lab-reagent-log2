@@ -1,174 +1,131 @@
 import streamlit as st
 import pandas as pd
 from datetime import datetime
-import gspread
-from google.oauth2.service_account import Credentials
+import os
 
-# =========================================================
-# [사용자 설정] 연결할 시트 ID 확인!
-# =========================================================
-TARGET_SHEET_ID = "1C6WwMX8enbWjR4Qhacp2t5T4gZw_n7p4_kFL5c6cDi0"
-# =========================================================
+# 데이터 파일 경로 설정
+DATA_FILE = 'culture_media_log.csv'
 
-# ---------------------------------------------------------
-# [설정] 구글 시트 연동 함수 (수정됨)
-# ---------------------------------------------------------
-def get_google_sheet_connection():
-    try:
-        scopes = [
-            "https://www.googleapis.com/auth/spreadsheets",
-            "https://www.googleapis.com/auth/drive",
-        ]
-        # Secrets 불러오기
-        secrets_dict = dict(st.secrets["gcp_service_account"])
-        
-        # 줄바꿈 문자 처리
-        if "private_key" in secrets_dict:
-            secrets_dict["private_key"] = secrets_dict["private_key"].replace("\\n", "\n")
+# 데이터 불러오기 함수
+def load_data():
+    if os.path.exists(DATA_FILE):
+        return pd.read_csv(DATA_FILE)
+    else:
+        # 파일이 없으면 빈 데이터프레임 생성 (컬럼 정의)
+        return pd.DataFrame(columns=[
+            '조제 번호', '조제 일자', '작업자', 
+            '원료1_Lot', '원료2_Lot', '원료3_Lot', 
+            'pH', '멸균 여부', '비고'
+        ])
 
-        # 이메일 주소 미리 확보 (에러 방지)
-        bot_email = secrets_dict.get("client_email", "이메일을 찾을 수 없음")
+# 데이터 저장 함수
+def save_data(df):
+    df.to_csv(DATA_FILE, index=False)
 
-        credentials = Credentials.from_service_account_info(
-            secrets_dict,
-            scopes=scopes,
-        )
-        gc = gspread.authorize(credentials)
-        
-        # 봇 객체와 이메일을 같이 반환
-        return gc, bot_email
-        
-    except Exception as e:
-        st.error(f"⚠️ 구글 연결(인증) 실패! Secrets를 확인하세요.\n에러: {e}")
-        st.stop()
-
-# ---------------------------------------------------------
-# [메인] 앱 화면 구성
-# ---------------------------------------------------------
-st.set_page_config(page_title="팀 시약 관리 시스템", page_icon="🧪", layout="wide")
-st.title("🧪 팀 시약 조제 및 사용 기록")
-
-# 구글 연결 및 봇 이메일 가져오기
-gc, bot_email = get_google_sheet_connection()
-
-# ---------------------------------------------------------
-# [핵심] 시트 연결 및 정밀 진단
-# ---------------------------------------------------------
-try:
-    sh = gc.open_by_key(TARGET_SHEET_ID)
-    # 연결 성공하면 바로 넘어감 (조용히)
+# 조제 번호 자동 생성 함수 (YYYYMMDD-CM-NN 형식)
+def generate_batch_id(df):
+    today_str = datetime.now().strftime("%Y%m%d") # 예: 20260107
+    prefix = f"{today_str}-CM-"
     
-except Exception as e:
-    # 🚨 연결 실패 시에만 이 화면이 뜹니다.
-    st.error("❌ 기존 시트에 연결할 수 없습니다! (권한 문제)")
+    # 데이터가 비어있으면 첫 번째 번호 부여
+    if df.empty:
+        return f"{prefix}01"
     
-    # 봇 이메일 크게 보여주기
-    st.warning(f"🤖 **봇 이메일 (이걸 복사해서 공유하세요):**\n\n`{bot_email}`")
+    # 오늘 날짜로 생성된 번호가 있는지 확인
+    # '조제 번호' 컬럼에서 오늘 날짜 prefix를 포함하는 행만 필터링
+    today_batches = df[df['조제 번호'].astype(str).str.startswith(prefix)]
     
-    st.markdown("""
-    **👇 해결 방법**
-    1. 위 **봇 이메일**을 복사합니다.
-    2. 구글 스프레드시트로 가서 우측 상단 **[공유]** 버튼을 누릅니다.
-    3. 이메일을 붙여넣고 **[편집자]** 권한으로 추가합니다. (이미 있다면 삭제했다가 다시 추가해보세요.)
-    4. **Google Drive API**가 켜져 있는지 확인합니다.
-    """)
-    st.stop()
+    if today_batches.empty:
+        return f"{prefix}01"
+    else:
+        # 기존 번호 중 가장 큰 숫자를 찾아 +1 (순번 추출)
+        # 예: 20260107-CM-02 -> 뒤의 02를 가져옴
+        last_ids = today_batches['조제 번호'].apply(lambda x: int(x.split('-')[-1]))
+        next_num = last_ids.max() + 1
+        return f"{prefix}{next_num:02d}"
 
-# ---------------------------------------------------------
-# [워크시트 확인 및 탭 구성] - 연결 성공 시 실행됨
-# ---------------------------------------------------------
-try:
-    # 조제기록 시트
-    try:
-        ws_prep = sh.worksheet("조제기록")
-    except:
-        ws_prep = sh.add_worksheet(title="조제기록", rows=100, cols=20)
-        ws_prep.append_row(["작성일시", "물질명", "조제자", "기본배지 Lot", "FBS Lot", "Antibiotics Lot", "사용기한", "비고"])
+def main():
+    st.set_page_config(page_title="배양배지 조제 기록 관리", layout="wide")
+    
+    st.title("🧫 배양배지 조제 관리 시스템")
+
+    # 데이터 로드
+    df = load_data()
+
+    # --- 사이드바: 데이터 입력 ---
+    with st.sidebar:
+        st.header("배양배지 조제 정보 입력") # (나) 명칭 변경 반영
         
-    # 사용기록 시트
-    try:
-        ws_usage = sh.worksheet("사용기록")
-    except:
-        ws_usage = sh.add_worksheet(title="사용기록", rows=100, cols=20)
-        ws_usage.append_row(["사용일시", "물질명", "사용자", "사용량/내용", "비고"])
-
-except Exception as e:
-    st.error(f"워크시트 탭 설정 중 오류: {e}")
-    st.stop()
-
-# 탭 나누기
-tab1, tab2 = st.tabs(["📝 시약 조제 (Preparation)", "사용 기록 (Usage)"])
-
-# [Tab 1] 시약 조제 기록
-with tab1:
-    st.subheader("1-5. 시약 조제 정보 입력")
-    with st.form("prep_form", clear_on_submit=True):
-        col1, col2 = st.columns(2)
-        with col1:
-            name = st.text_input("1. 물질명 (Name)")
-            maker = st.text_input("2. 조제자 (User)")
-            expiry = st.date_input("4. 사용 기한 (Exp. Date)")
-        with col2:
-            st.markdown("**3. 원료 Lot No.**")
-            lot_base = st.text_input("3-1. 기본 배지 (Basal Media)")
-            lot_fbs = st.text_input("3-2. FBS (Fetal Bovine Serum)")
-            lot_anti = st.text_input("3-3. Antibiotics")
-        memo = st.text_area("5. 특이사항 및 비고")
-        submitted_prep = st.form_submit_button("조제 기록 저장")
-        
-        if submitted_prep:
-            if not name or not maker:
-                st.warning("물질명과 조제자는 필수 입력입니다.")
-            else:
-                now_str = datetime.now().strftime("%Y-%m-%d %H:%M")
-                row_data = [now_str, name, maker, lot_base, lot_fbs, lot_anti, str(expiry), memo]
-                ws_prep.append_row(row_data)
-                st.success(f"✅ [{name}] 조제 기록 저장 완료!")
-
-    st.divider()
-    st.subheader("6. 최근 조제 기록")
-    try:
-        data_prep = ws_prep.get_all_records()
-        if data_prep:
-            df_prep = pd.DataFrame(data_prep)
-            if "작성일시" in df_prep.columns:
-                df_prep = df_prep.sort_values(by="작성일시", ascending=False)
-            st.dataframe(df_prep, use_container_width=True)
-        else:
-            st.info("기록 없음")
-    except:
-        st.info("데이터를 불러오는 중입니다...")
-
-# [Tab 2] 시약 사용 기록
-with tab2:
-    st.subheader("시약 사용 대장")
-    with st.form("usage_form", clear_on_submit=True):
-        u_col1, u_col2 = st.columns(2)
-        with u_col1:
-            u_name = st.text_input("물질명")
-            u_user = st.text_input("사용자")
-        with u_col2:
-            u_amount = st.text_input("사용량/내용")
-            u_memo = st.text_input("비고")
-        submitted_use = st.form_submit_button("사용 기록 저장")
-        
-        if submitted_use:
-            now_str = datetime.now().strftime("%Y-%m-%d %H:%M")
-            row_data = [now_str, u_name, u_user, u_amount, u_memo]
-            ws_usage.append_row(row_data)
-            st.success("✅ 사용 기록 저장 완료!")
+        with st.form("media_form", clear_on_submit=True):
+            # (가) 조제 번호 자동 생성 로직 적용
+            auto_batch_id = generate_batch_id(df)
+            st.info(f"생성될 조제 번호: **{auto_batch_id}**")
             
-    st.divider()
-    st.subheader("7. 최근 사용 기록")
-    try:
-        data_use = ws_usage.get_all_records()
-        if data_use:
-            df_use = pd.DataFrame(data_use)
-            if "사용일시" in df_use.columns:
-                df_use = df_use.sort_values(by="사용일시", ascending=False)
-            st.dataframe(df_use, use_container_width=True)
-        else:
-            st.info("기록 없음")
-    except:
-         st.info("데이터를 불러오는 중입니다...")
+            # 기본 정보
+            date = st.date_input("조제 일자", datetime.now())
+            operator = st.text_input("작업자 이름")
+            
+            st.markdown("---")
+            
+            # (다) & (라) 원료 Lot No. 입력 섹션 수정
+            st.write("**원료 Lot No.**") 
+            # 실제 사용하시는 원료명으로 아래 label을 수정하세요
+            lot_1 = st.text_input("1. Glucose (글루코스)") 
+            lot_2 = st.text_input("2. Yeast Extract (효모 추출물)")
+            lot_3 = st.text_input("3. Peptone (펩톤)")
+            
+            st.markdown("---")
+            
+            # 기타 정보
+            ph_value = st.number_input("pH 측정값", min_value=0.0, max_value=14.0, value=7.0, step=0.1)
+            sterilization = st.selectbox("멸균 여부 (Autoclave)", ["Y", "N"])
+            notes = st.text_area("비고 (특이사항)")
+            
+            submitted = st.form_submit_button("저장하기")
+            
+            if submitted:
+                if not operator:
+                    st.error("작업자 이름을 입력해주세요.")
+                else:
+                    # 새로운 데이터 추가
+                    new_data = {
+                        '조제 번호': auto_batch_id,
+                        '조제 일자': date.strftime("%Y-%m-%d"),
+                        '작업자': operator,
+                        '원료1_Lot': lot_1,
+                        '원료2_Lot': lot_2,
+                        '원료3_Lot': lot_3,
+                        'pH': ph_value,
+                        '멸균 여부': sterilization,
+                        '비고': notes
+                    }
+                    
+                    # DataFrame에 추가 및 저장 (concat 사용 권장)
+                    new_df = pd.DataFrame([new_data])
+                    df = pd.concat([df, new_df], ignore_index=True)
+                    save_data(df)
+                    
+                    st.success(f"[{auto_batch_id}] 기록이 저장되었습니다!")
+                    st.rerun() # 데이터 갱신을 위해 리런
 
+    # --- 메인 화면: 데이터 조회 ---
+    # (마) 명칭 변경 반영
+    st.subheader("최근 사용 기록") 
+
+    if not df.empty:
+        # 최신순으로 정렬 (인덱스 역순)
+        st.dataframe(df.sort_index(ascending=False), use_container_width=True)
+        
+        # 다운로드 버튼
+        csv = df.to_csv(index=False).encode('utf-8-sig')
+        st.download_button(
+            label="CSV로 다운로드",
+            data=csv,
+            file_name='culture_media_log.csv',
+            mime='text/csv',
+        )
+    else:
+        st.info("아직 저장된 기록이 없습니다. 사이드바에서 첫 번째 기록을 입력해주세요.")
+
+if __name__ == "__main__":
+    main()

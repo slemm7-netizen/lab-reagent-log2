@@ -95,7 +95,6 @@ def main():
                     }
                     
                     new_df = pd.DataFrame([new_data])
-                    # 최신 데이터를 아래에 추가
                     df = pd.concat([df, new_df], ignore_index=True)
                     save_data(df)
                     
@@ -105,43 +104,58 @@ def main():
     # --- Sheet 2: 기록 및 수정 ---
     with tab2:
         st.subheader("최근 사용 기록 (수정 가능)")
-        st.caption("표의 내용을 더블 클릭하여 직접 수정한 후, 아래 '수정사항 저장하기' 버튼을 누르세요.")
         
         if not df.empty:
-            # 화면 표시를 위해 최신순으로 정렬하지만, 실제 데이터 구조는 유지
-            # 사용자가 보기 편하게 엑셀 형식의 에디터 제공
+            st.caption("1. 내용을 수정하려면 표를 더블 클릭하세요. / 2. 행을 삭제하려면 왼쪽 체크박스를 선택 후 Delete 키를 누르세요.")
+            
+            # 데이터 에디터
             edited_df = st.data_editor(
                 df,
                 column_config={
-                    "조제 번호": st.column_config.TextColumn(disabled=True), # 조제 번호는 수정 불가
+                    "조제 번호": st.column_config.TextColumn(disabled=True),
                     "Basal Media_Lot": "기본 배지 Lot",
                     "FBS_Lot": "FBS Lot",
                     "Antibiotics_Lot": "Antibiotics Lot",
                 },
                 use_container_width=True,
-                num_rows="dynamic", # 행 추가/삭제 가능 (필요 없으면 "fixed"로 변경)
+                num_rows="dynamic",
                 key="data_editor"
             )
             
-            col_btn1, col_btn2 = st.columns([1, 4])
+            col_btn1, col_btn2, col_btn3 = st.columns([1, 1, 3])
+            
+            # 수정 저장 버튼
             with col_btn1:
-                if st.button("💾 수정사항 저장하기", type="primary"):
+                if st.button("💾 수정사항 저장", type="primary"):
                     save_data(edited_df)
-                    st.success("데이터가 성공적으로 수정되었습니다!")
+                    st.success("수정 완료!")
                     st.rerun()
             
+            # 전체 초기화 버튼 (테스트 후 사용)
             with col_btn2:
-                # CSV 다운로드 (수정된 데이터 기준)
+                if st.button("🗑️ 전체 데이터 삭제"):
+                    # 빈 데이터프레임으로 덮어쓰기
+                    empty_df = pd.DataFrame(columns=[
+                        '조제 번호', '조제 일자', '작업자', 
+                        'Basal Media_Lot', 'FBS_Lot', 'Antibiotics_Lot', 
+                        '비고'
+                    ])
+                    save_data(empty_df)
+                    st.warning("모든 데이터가 삭제되었습니다.")
+                    st.rerun()
+
+            # CSV 다운로드
+            with col_btn3:
                 csv = edited_df.to_csv(index=False).encode('utf-8-sig')
                 st.download_button(
-                    label="CSV 파일 다운로드",
+                    label="📥 CSV 다운로드",
                     data=csv,
                     file_name='culture_media_log.csv',
                     mime='text/csv',
                 )
 
         else:
-            st.info("아직 저장된 기록이 없습니다. '배양배지 조제 정보 입력' 탭에서 기록을 추가해주세요.")
+            st.info("데이터가 없습니다. 입력 탭에서 데이터를 추가하세요.")
 
 if __name__ == "__main__":
     main()

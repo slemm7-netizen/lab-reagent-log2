@@ -7,7 +7,7 @@ from google.oauth2.service_account import Credentials
 # =========================================================
 # [사용자 설정] 연결할 시트 ID 확인!
 # =========================================================
-TARGET_SHEET_ID = "11716I3GkYFuB-lLEpD_Ciy76a9EAHwj69jGWsLMLpEc"
+TARGET_SHEET_ID = "1C6WwMX8enbWjR4Qhacp2t5T4gZw_n7p4_kFL5c6cDi0"
 # =========================================================
 
 # ---------------------------------------------------------
@@ -171,3 +171,4 @@ with tab2:
             st.info("기록 없음")
     except:
          st.info("데이터를 불러오는 중입니다...")
+

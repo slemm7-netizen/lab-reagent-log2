@@ -50,8 +50,8 @@ def main():
     # 데이터 로드
     df = load_data()
 
-    # 탭 구성 (Sheet 1, Sheet 2 역할)
-    tab1, tab2 = st.tabs(["📝 배양배지 조제 정보 입력", "📋 사용 기록"])
+    # 탭 구성
+    tab1, tab2 = st.tabs(["📝 배양배지 조제 정보 입력", "📋 사용 기록 및 수정"])
 
     # --- Sheet 1: 입력 ---
     with tab1:
@@ -95,34 +95,51 @@ def main():
                     }
                     
                     new_df = pd.DataFrame([new_data])
+                    # 최신 데이터를 아래에 추가
                     df = pd.concat([df, new_df], ignore_index=True)
                     save_data(df)
                     
                     st.success(f"[{auto_batch_id}] 기록이 성공적으로 저장되었습니다!")
                     st.rerun()
 
-    # --- Sheet 2: 기록 ---
+    # --- Sheet 2: 기록 및 수정 ---
     with tab2:
-        st.subheader("최근 사용 기록")
+        st.subheader("최근 사용 기록 (수정 가능)")
+        st.caption("표의 내용을 더블 클릭하여 직접 수정한 후, 아래 '수정사항 저장하기' 버튼을 누르세요.")
         
         if not df.empty:
-            # 화면 표시용 컬럼명 변경 (깔끔하게)
-            display_df = df.rename(columns={
-                'Basal Media_Lot': '기본 배지 Lot',
-                'FBS_Lot': 'FBS Lot',
-                'Antibiotics_Lot': 'Antibiotics Lot'
-            })
-            
-            # 최신순 정렬
-            st.dataframe(display_df.sort_index(ascending=False), use_container_width=True)
-            
-            csv = df.to_csv(index=False).encode('utf-8-sig')
-            st.download_button(
-                label="CSV 파일 다운로드",
-                data=csv,
-                file_name='culture_media_log.csv',
-                mime='text/csv',
+            # 화면 표시를 위해 최신순으로 정렬하지만, 실제 데이터 구조는 유지
+            # 사용자가 보기 편하게 엑셀 형식의 에디터 제공
+            edited_df = st.data_editor(
+                df,
+                column_config={
+                    "조제 번호": st.column_config.TextColumn(disabled=True), # 조제 번호는 수정 불가
+                    "Basal Media_Lot": "기본 배지 Lot",
+                    "FBS_Lot": "FBS Lot",
+                    "Antibiotics_Lot": "Antibiotics Lot",
+                },
+                use_container_width=True,
+                num_rows="dynamic", # 행 추가/삭제 가능 (필요 없으면 "fixed"로 변경)
+                key="data_editor"
             )
+            
+            col_btn1, col_btn2 = st.columns([1, 4])
+            with col_btn1:
+                if st.button("💾 수정사항 저장하기", type="primary"):
+                    save_data(edited_df)
+                    st.success("데이터가 성공적으로 수정되었습니다!")
+                    st.rerun()
+            
+            with col_btn2:
+                # CSV 다운로드 (수정된 데이터 기준)
+                csv = edited_df.to_csv(index=False).encode('utf-8-sig')
+                st.download_button(
+                    label="CSV 파일 다운로드",
+                    data=csv,
+                    file_name='culture_media_log.csv',
+                    mime='text/csv',
+                )
+
         else:
             st.info("아직 저장된 기록이 없습니다. '배양배지 조제 정보 입력' 탭에서 기록을 추가해주세요.")
 

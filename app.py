@@ -5,12 +5,9 @@ import gspread
 from google.oauth2.service_account import Credentials
 
 # =========================================================
-# [사용자 설정] 이메일 적용 완료
+# [사용자 설정] 연결할 시트 ID 확인!
 # =========================================================
-# 봇이 시트를 새로 만들면 이 주소로 공유해줍니다.
-MY_GOOGLE_EMAIL = "slemm7@gmail.com"
-
-# 기존 시트 ID (일단 이걸로 찾기 시도)
+# 주소창의 https://docs.google.com/spreadsheets/d/ 뒤에 있는 값
 TARGET_SHEET_ID = "11716I3GkYFuB-lLEpD_Ciy76a9EAHwj69jGWsLMLpEc"
 # =========================================================
 
@@ -19,13 +16,11 @@ TARGET_SHEET_ID = "11716I3GkYFuB-lLEpD_Ciy76a9EAHwj69jGWsLMLpEc"
 # ---------------------------------------------------------
 def get_google_sheet_connection():
     try:
-        # 봇이 파일을 생성하고 공유하려면 'drive' 권한이 필수입니다.
         scopes = [
             "https://www.googleapis.com/auth/spreadsheets",
             "https://www.googleapis.com/auth/drive",
         ]
-        
-        # Secrets 처리 (줄바꿈 문자 에러 방지)
+        # Secrets 줄바꿈 문자 처리
         secrets_dict = dict(st.secrets["gcp_service_account"])
         if "private_key" in secrets_dict:
             secrets_dict["private_key"] = secrets_dict["private_key"].replace("\\n", "\n")
@@ -37,7 +32,7 @@ def get_google_sheet_connection():
         gc = gspread.authorize(credentials)
         return gc
     except Exception as e:
-        st.error(f"⚠️ 구글 연결 실패! Secrets 설정을 확인해주세요.\n에러 내용: {e}")
+        st.error(f"⚠️ 구글 연결(인증) 실패! Secrets를 확인하세요.\n에러: {e}")
         st.stop()
 
 # ---------------------------------------------------------
@@ -50,36 +45,41 @@ st.title("🧪 팀 시약 조제 및 사용 기록")
 gc = get_google_sheet_connection()
 
 # ---------------------------------------------------------
-# [핵심] 시트 연결 (없으면 생성하는 로직)
+# [핵심] 시트 연결 및 정밀 진단
 # ---------------------------------------------------------
 try:
-    # 1단계: 기존 ID로 연결 시도
     sh = gc.open_by_key(TARGET_SHEET_ID)
+    # 연결 성공하면 조용히 넘어감
+except Exception as e:
+    # 연결 실패 시 상세 리포트 출력
+    st.error("❌ 기존 시트에 연결할 수 없습니다!")
     
-except Exception:
-    # 2단계: 실패 시 (권한 문제 등), 봇이 직접 새로 생성
-    st.warning(f"⚠️ 기존 시트({TARGET_SHEET_ID})에 접근할 수 없어, 봇이 새로운 시트를 생성합니다...")
+    # 1. 봇 정보 보여주기
+    bot_email = gc.auth.service_account_email
+    st.warning(f"🤖 **현재 봇의 이메일:**\n\n`{bot_email}`")
     
-    try:
-        # 새 시트 생성
-        new_sheet_name = "팀_시약관리_대장(봇생성)"
-        sh = gc.create(new_sheet_name)
-        
-        # 사용자에게 공유 (편집 권한 부여)
-        sh.share(MY_GOOGLE_EMAIL, perm_type='user', role='writer')
-        
-        st.success(f"""
-        ✅ **새로운 시트가 생성되었습니다!**
-        
-        1. 구글 드라이브(Drive)에 가시면 **[{new_sheet_name}]** 파일이 생겼을 겁니다.
-        2. 봇이 **{MY_GOOGLE_EMAIL}** 계정으로 편집 권한을 공유했습니다.
-        """)
-    except Exception as e_create:
-        st.error(f"❌ 새 시트 생성 실패! Google Drive API가 켜져 있는지 확인하세요.\n에러: {e_create}")
-        st.stop()
+    st.markdown("""
+    **👇 해결 방법 (순서대로 확인해보세요)**
+    1. 위 **봇 이메일**을 복사하세요.
+    2. 구글 스프레드시트 우측 상단 **[공유]** 버튼을 누르세요.
+    3. 목록에 이 이메일이 있는지, **[편집자]** 권한인지 확인하세요. (없으면 다시 초대!)
+    4. 시트 ID(`11716...`)가 정확한지 주소창을 다시 확인하세요.
+    """)
+    
+    # 2. 에러 원인 분석
+    error_msg = str(e)
+    st.markdown("---")
+    st.markdown(f"**🔍 상세 에러 메시지:**\n`{error_msg}`")
+    
+    if "403" in error_msg:
+        st.info("💡 **힌트:** [403 Forbidden] 에러는 **'공유가 안 됨'** 뜻입니다. 공유 설정을 다시 확인하세요.")
+    elif "404" in error_msg:
+        st.info("💡 **힌트:** [404 Not Found] 에러는 **'시트 ID가 틀림'** 뜻입니다. ID를 다시 확인하세요.")
+    
+    st.stop()
 
 # ---------------------------------------------------------
-# [워크시트 확인 및 탭 구성]
+# [워크시트 확인 및 탭 구성] - 연결 성공 시 실행됨
 # ---------------------------------------------------------
 try:
     # 조제기록 시트
@@ -97,5 +97,81 @@ try:
         ws_usage.append_row(["사용일시", "물질명", "사용자", "사용량/내용", "비고"])
 
 except Exception as e:
-    st.error(f"워크시트 설정 중 오류 발생: {e}")
-    st.stop
+    st.error(f"워크시트 탭 설정 중 오류: {e}")
+    st.stop()
+
+# 탭 나누기
+tab1, tab2 = st.tabs(["📝 시약 조제 (Preparation)", "사용 기록 (Usage)"])
+
+# [Tab 1] 시약 조제 기록
+with tab1:
+    st.subheader("1-5. 시약 조제 정보 입력")
+    with st.form("prep_form", clear_on_submit=True):
+        col1, col2 = st.columns(2)
+        with col1:
+            name = st.text_input("1. 물질명 (Name)")
+            maker = st.text_input("2. 조제자 (User)")
+            expiry = st.date_input("4. 사용 기한 (Exp. Date)")
+        with col2:
+            st.markdown("**3. 원료 Lot No.**")
+            lot_base = st.text_input("3-1. 기본 배지 (Basal Media)")
+            lot_fbs = st.text_input("3-2. FBS (Fetal Bovine Serum)")
+            lot_anti = st.text_input("3-3. Antibiotics")
+        memo = st.text_area("5. 특이사항 및 비고")
+        submitted_prep = st.form_submit_button("조제 기록 저장")
+        
+        if submitted_prep:
+            if not name or not maker:
+                st.warning("물질명과 조제자는 필수 입력입니다.")
+            else:
+                now_str = datetime.now().strftime("%Y-%m-%d %H:%M")
+                row_data = [now_str, name, maker, lot_base, lot_fbs, lot_anti, str(expiry), memo]
+                ws_prep.append_row(row_data)
+                st.success(f"✅ [{name}] 조제 기록 저장 완료!")
+
+    st.divider()
+    st.subheader("6. 최근 조제 기록")
+    try:
+        data_prep = ws_prep.get_all_records()
+        if data_prep:
+            df_prep = pd.DataFrame(data_prep)
+            if "작성일시" in df_prep.columns:
+                df_prep = df_prep.sort_values(by="작성일시", ascending=False)
+            st.dataframe(df_prep, use_container_width=True)
+        else:
+            st.info("기록 없음")
+    except:
+        st.info("데이터를 불러오는 중입니다...")
+
+# [Tab 2] 시약 사용 기록
+with tab2:
+    st.subheader("시약 사용 대장")
+    with st.form("usage_form", clear_on_submit=True):
+        u_col1, u_col2 = st.columns(2)
+        with u_col1:
+            u_name = st.text_input("물질명")
+            u_user = st.text_input("사용자")
+        with u_col2:
+            u_amount = st.text_input("사용량/내용")
+            u_memo = st.text_input("비고")
+        submitted_use = st.form_submit_button("사용 기록 저장")
+        
+        if submitted_use:
+            now_str = datetime.now().strftime("%Y-%m-%d %H:%M")
+            row_data = [now_str, u_name, u_user, u_amount, u_memo]
+            ws_usage.append_row(row_data)
+            st.success("✅ 사용 기록 저장 완료!")
+            
+    st.divider()
+    st.subheader("7. 최근 사용 기록")
+    try:
+        data_use = ws_usage.get_all_records()
+        if data_use:
+            df_use = pd.DataFrame(data_use)
+            if "사용일시" in df_use.columns:
+                df_use = df_use.sort_values(by="사용일시", ascending=False)
+            st.dataframe(df_use, use_container_width=True)
+        else:
+            st.info("기록 없음")
+    except:
+         st.info("데이터를 불러오는 중입니다...")
